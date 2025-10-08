@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Analisador de Estrutura XML</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        .file-drop-area {
+            transition: background-color 0.2s ease-in-out, border-color 0.2s ease-in-out;
+        }
+        .file-drop-area.dragover {
+            background-color: #374151; /* gray-700 */
+            border-color: #3b82f6; /* blue-500 */
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-white flex items-center justify-center min-h-screen p-4">
+
+    <div class="w-full max-w-4xl bg-gray-800 rounded-2xl shadow-2xl p-6 md:p-8 space-y-6">
+        <!-- Cabeçalho -->
+        <div class="text-center">
+            <h1 class="text-3xl font-bold text-gray-100">Analisador de Estrutura XML</h1>
+            <p class="text-gray-400 mt-2">Carregue ou arraste um arquivo XML para validar sua estrutura e campos obrigatórios.</p>
+        </div>
+
+        <!-- Área de Upload de Arquivo -->
+        <div class="space-y-4">
+            <label for="file-upload" class="file-drop-area relative block w-full border-2 border-dashed border-gray-600 rounded-lg p-12 text-center cursor-pointer hover:border-blue-500 hover:bg-gray-700">
+                <div class="flex flex-col items-center justify-center">
+                    <svg class="w-12 h-12 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-4-4V6a4 4 0 014-4h10a4 4 0 014 4v6a4 4 0 01-4 4H7z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 9v6m3-3H7"></path></svg>
+                    <p id="file-name" class="mt-2 text-sm text-gray-400">
+                        <span class="font-semibold text-blue-400">Clique para carregar</span> ou arraste e solte o arquivo
+                    </p>
+                    <p class="text-xs text-gray-500">Suporta formatos OpenNavent e Carga</p>
+                </div>
+                <input id="file-upload" name="file-upload" type="file" class="sr-only" accept=".xml">
+            </label>
+        </div>
+        
+        <!-- Opções de Análise -->
+        <div class="flex items-center justify-center space-x-3 text-sm text-gray-400">
+            <input type="checkbox" id="strict-mode" name="strict-mode" class="h-4 w-4 rounded border-gray-500 bg-gray-700 text-blue-600 focus:ring-blue-500 focus:ring-offset-gray-800" checked>
+            <label for="strict-mode">Modo Estrito (para formato OpenNavent)</label>
+        </div>
+
+        <!-- Botão de Análise -->
+        <div class="flex justify-center pt-2">
+            <button id="analyze-button"
+                class="w-full md:w-1/2 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white font-bold py-3 px-4 rounded-lg transition-colors duration-300 shadow-lg"
+                disabled>
+                Analisar Arquivo
+            </button>
+        </div>
+
+        <!-- Área de Resultados -->
+        <div id="results-container" class="hidden space-y-6 pt-6 border-t border-gray-700">
+             <!-- Spinner de carregamento -->
+            <div id="loading-spinner" class="hidden flex items-center justify-center space-x-2">
+                <svg class="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                <span class="text-gray-400">Analisando...</span>
+            </div>
+
+            <!-- Resumo -->
+            <div id="summary-section" class="bg-gray-900/50 p-4 rounded-lg">
+                <h2 class="text-xl font-semibold mb-2">Resultados da Análise</h2>
+                <div id="summary-content" class="grid grid-cols-2 md:grid-cols-5 gap-4 text-center">
+                    <!-- Os resultados serão inseridos aqui -->
+                </div>
+            </div>
+
+            <!-- Avisos -->
+            <div id="warnings-section" class="hidden">
+                <h3 class="text-lg font-semibold text-yellow-400 mb-2">⚠️ Avisos</h3>
+                <div id="warnings-list" class="bg-yellow-900/30 text-yellow-300 p-4 rounded-lg text-sm space-y-2"></div>
+            </div>
+
+            <!-- Erros -->
+            <div id="errors-section" class="hidden">
+                <h3 class="text-lg font-semibold text-red-400 mb-2">❌ Erros Encontrados</h3>
+                <div id="errors-list" class="bg-red-900/30 text-red-300 p-4 rounded-lg text-sm space-y-2"></div>
+            </div>
+        </div>
+    </div>
+
+<script>
+// --- Lógica do Analisador (Multi-Formato) ---
+
+const PT_OPN_REQUIRED_FIELDS = {
+    'OpenNavent': ['Imoveis'],
+    'Imovel': ['codigoAnuncio', 'descricao', 'tipoPropriedade', 'precos', 'localizacao', 'publicador'],
+    'Imovel/tipoPropriedade': ['idTipo'],
+    'Imovel/precos/preco': ['operacao', 'quantidade', 'moeda'],
+    'Imovel/publicador': ['codigoImobiliaria'],
+    'Imovel/caracteristicas/caracteristica': ['id', 'nome']
+};
+
+const PT_CARGA_REQUIRED_FIELDS = ['CodigoCentralVendas', 'CodigoImovel', 'TipoImovel', 'Observacao', 'UF', 'Cidade'];
+
+class StructureAnalyzer {
+    analyzeFileContent(content, fileName, strictMode) {
+        let errors = [];
+        let warnings = [];
+        let imoveisCount = 0;
+        let format = 'Genérico';
+
+        const xmlDeclarations = content.match(/<\?xml/g) || [];
+
+        if (xmlDeclarations.length > 1) {
+            warnings.push("Múltiplas declarações XML encontradas. Analisando como documentos separados.");
+            const xmlDocs = this._splitMultiXml(content);
+            xmlDocs.forEach((xmlDoc, i) => {
+                const result = this._analyzeXmlString(xmlDoc, `Documento ${i + 1}`, strictMode);
+                errors.push(...result.errors);
+                warnings.push(...result.warnings);
+                imoveisCount += result.imoveisCount;
+                if(result.format !== 'Genérico') format = result.format;
+            });
+        } else {
+            const result = this._analyzeXmlString(content, "XML", strictMode);
+            errors = result.errors;
+            warnings = result.warnings;
+            imoveisCount = result.imoveisCount;
+            format = result.format;
+        }
+
+        return { errors, warnings, imoveisCount, format };
+    }
+
+    _splitMultiXml(content) {
+        const parts = content.split(/(<\?xml[^>]+\?>)/).filter(Boolean);
+        const docs = [];
+        for (let i = 0; i < parts.length; i += 2) {
+            if (parts[i] && parts[i+1]) {
+                docs.push(parts[i] + parts[i+1]);
+            }
+        }
+        return docs;
+    }
+    
+    _analyzeXmlString(xmlString, docName, strictMode) {
+        const errors = [];
+        const warnings = [];
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(xmlString, "application/xml");
+        
+        const parserError = doc.querySelector("parsererror");
+        if (parserError) {
+            let errorMessage = "Erro de sintaxe XML. Verifique a estrutura do arquivo.";
+            const errorDetails = parserError.querySelector('div');
+            if (errorDetails) {
+                errorMessage = `Erro de sintaxe: ${errorDetails.textContent.trim().replace('error on line', 'na linha').replace('at column', 'coluna')}`;
+            }
+            errors.push(`${docName}: ${errorMessage}`);
+            return { errors, warnings, imoveisCount: 0, format: 'Inválido' };
+        }
+
+        const root = doc.documentElement;
+        let imoveisCount = 0;
+        let format = 'Genérico';
+
+        if (root.tagName === 'OpenNavent') {
+            format = 'OpenNavent';
+            const result = this._processOpenNavent(doc, docName, strictMode);
+            errors.push(...result.errors);
+            warnings.push(...result.warnings);
+            imoveisCount = result.imoveisCount;
+        } else if (root.tagName === 'Carga') {
+            format = 'Carga';
+            const result = this._processCarga(doc, docName);
+            errors.push(...result.errors);
+            warnings.push(...result.warnings);
+            imoveisCount = result.imoveisCount;
+        } else {
+            warnings.push(`${docName}: O elemento raiz não é '&lt;OpenNavent&gt;' nem '&lt;Carga&gt;'. Tentando análise genérica.`);
+            const imoveis = doc.querySelectorAll('Imovel');
+            imoveisCount = imoveis.length;
+            if (imoveisCount > 0) {
+                 warnings.push(`${docName}: Encontrados ${imoveisCount} imóveis em uma estrutura não padrão. A validação pode ser incompleta.`);
+            } else {
+                errors.push(`${docName}: Nenhum imóvel encontrado para analisar.`);
+            }
+        }
+        
+        return { errors, warnings, imoveisCount, format };
+    }
+
+    _processOpenNavent(doc, docName, strictMode) {
+        const errors = [];
+        const warnings = [];
+        let imoveisCount = 0;
+
+        const root = doc.documentElement;
+        const hasData = root.querySelector(':scope > dataModificacao');
+        if (!hasData) {
+            warnings.push(`${docName}: Recomenda-se incluir a tag &lt;dataModificacao&gt; para evitar a sobreposição de dados.`);
+        }
+
+        this._checkOpenNaventFields(root, errors, docName, 'OpenNavent', strictMode);
+        const imoveisContainer = root.querySelector('Imoveis');
+        if (imoveisContainer) {
+            const imoveis = Array.from(imoveisContainer.children).filter(el => el.tagName === 'Imovel');
+            imoveisCount = imoveis.length;
+            imoveis.forEach((imovel, i) => {
+                const codigo = imovel.querySelector('codigoAnuncio')?.textContent || 'sem_codigo';
+                const docId = `${docName}: Imóvel #${i + 1} (${codigo})`;
+                if (imovel.children.length === 0) {
+                    errors.push(`${docId} está vazio (não possui elementos filho).`);
+                    return;
+                }
+                this._checkOpenNaventFields(imovel, errors, docId, 'Imovel', strictMode);
+            });
+        }
+        return { errors, warnings, imoveisCount };
+    }
+
+    _checkOpenNaventFields(element, errors, docName, path, strictMode) {
+        const requiredFieldsForPath = PT_OPN_REQUIRED_FIELDS[path];
+        
+        if (requiredFieldsForPath) {
+            const childTags = Array.from(element.children).map(child => child.tagName);
+
+            requiredFieldsForPath.forEach(field => {
+                const isFlexibleCharacteristicId = path === 'Imovel/caracteristicas/caracteristica' && field === 'id' && !strictMode;
+                if (!isFlexibleCharacteristicId && !childTags.includes(field)) {
+                    errors.push(`${docName}: Campo obrigatório '${field}' ausente em '${path}'.`);
+                }
+            });
+
+            requiredFieldsForPath.forEach(field => {
+                const childElement = element.querySelector(`:scope > ${field}`);
+                if (childElement && (!childElement.textContent || childElement.textContent.trim() === '')) {
+                    if (childElement.children.length === 0) {
+                        if (path === 'Imovel/caracteristicas/caracteristica' && !strictMode) return;
+                        errors.push(`${docName}: Campo obrigatório '${field}' em '${path}' está vazio.`);
+                    }
+                }
+            });
+        }
+
+        if (path === 'Imovel/localizacao') {
+            const childTags = Array.from(element.children).map(child => child.tagName);
+            const hasIdLocalidade = childTags.includes('idLocalidade') && element.querySelector('idLocalidade').textContent.trim() !== '';
+            const hasLatitude = childTags.includes('latitude') && element.querySelector('latitude').textContent.trim() !== '';
+            const hasLongitude = childTags.includes('longitude') && element.querySelector('longitude').textContent.trim() !== '';
+
+            if (!hasIdLocalidade && !(hasLatitude && hasLongitude)) {
+                errors.push(`${docName}: Campo 'localizacao' incompleto. É necessário 'idLocalidade' OU ambos 'latitude' e 'longitude' em '${path}'.`);
+            }
+        }
+        
+        Array.from(element.children).forEach(child => {
+            const newPath = `${path}/${child.tagName}`;
+            this._checkOpenNaventFields(child, errors, docName, newPath, strictMode);
+        });
+    }
+
+    _processCarga(doc, docName) {
+        const errors = [];
+        const warnings = [];
+        let imoveisCount = 0;
+        
+        const imoveisContainer = doc.querySelector('Carga > Imoveis');
+        if (imoveisContainer) {
+            const imoveis = Array.from(imoveisContainer.children).filter(el => el.tagName === 'Imovel');
+            imoveisCount = imoveis.length;
+
+            imoveis.forEach((imovel, i) => {
+                const codigo = imovel.querySelector('CodigoImovel')?.textContent || 'sem_codigo';
+                const docId = `${docName}: Imóvel #${i + 1} (${codigo})`;
+
+                // Validar campos obrigatórios diretos
+                PT_CARGA_REQUIRED_FIELDS.forEach(field => {
+                    const el = imovel.querySelector(`:scope > ${field}`);
+                    if (!el) {
+                        errors.push(`${docId}: Campo obrigatório '${field}' ausente.`);
+                    } else if (!el.textContent || el.textContent.trim() === '') {
+                        errors.push(`${docId}: Campo obrigatório '${field}' está vazio.`);
+                    }
+                });
+
+                // Validar preço
+                const hasPreco = imovel.querySelector('PrecoVenda') || imovel.querySelector('PrecoLocacao');
+                if (!hasPreco) {
+                    errors.push(`${docId}: É necessário informar um preço (ex: 'PrecoVenda').`);
+                }
+            });
+        } else {
+             errors.push(`${docName}: Estrutura inválida. A tag <Imoveis> não foi encontrada dentro de <Carga>.`);
+        }
+        return { errors, warnings, imoveisCount };
+    }
+}
+
+// --- Lógica da Interface do Usuário (UI) ---
+document.addEventListener('DOMContentLoaded', () => {
+    const fileUpload = document.getElementById('file-upload');
+    const fileNameDisplay = document.getElementById('file-name');
+    const analyzeButton = document.getElementById('analyze-button');
+    const resultsContainer = document.getElementById('results-container');
+    const loadingSpinner = document.getElementById('loading-spinner');
+    const summarySection = document.getElementById('summary-section');
+    const summaryContent = document.getElementById('summary-content');
+    const warningsSection = document.getElementById('warnings-section');
+    const warningsList = document.getElementById('warnings-list');
+    const errorsSection = document.getElementById('errors-section');
+    const errorsList = document.getElementById('errors-list');
+    const fileDropArea = document.querySelector('.file-drop-area');
+
+    let currentFile = null;
+
+    const handleFileSelect = (file) => {
+        if (file && (file.type === 'text/xml' || file.name.endsWith('.xml'))) {
+            currentFile = file;
+            fileNameDisplay.innerHTML = `<span class="font-semibold">${file.name}</span>`;
+            analyzeButton.disabled = false;
+        } else {
+            currentFile = null;
+            fileNameDisplay.innerHTML = `<span class="font-semibold text-red-400">Arquivo inválido.</span> Por favor, selecione um arquivo .xml`;
+            analyzeButton.disabled = true;
+        }
+    };
+
+    fileUpload.addEventListener('change', (e) => handleFileSelect(e.target.files[0]));
+    fileDropArea.addEventListener('dragover', (e) => { e.preventDefault(); fileDropArea.classList.add('dragover'); });
+    fileDropArea.addEventListener('dragleave', (e) => { e.preventDefault(); fileDropArea.classList.remove('dragover'); });
+    fileDropArea.addEventListener('drop', (e) => {
+        e.preventDefault();
+        fileDropArea.classList.remove('dragover');
+        const files = e.dataTransfer.files;
+        if (files.length > 0) {
+            fileUpload.files = files;
+            handleFileSelect(files[0]);
+        }
+    });
+
+    analyzeButton.addEventListener('click', () => {
+        if (!currentFile) return;
+
+        resultsContainer.classList.remove('hidden');
+        loadingSpinner.classList.remove('hidden');
+        summarySection.classList.add('hidden');
+        warningsSection.classList.add('hidden');
+        errorsSection.classList.add('hidden');
+        
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            const content = e.target.result;
+            const strictMode = document.getElementById('strict-mode').checked;
+            const analyzer = new StructureAnalyzer();
+            const startTime = performance.now();
+            const results = analyzer.analyzeFileContent(content, currentFile.name, strictMode);
+            const endTime = performance.now();
+            results.executionTime = ((endTime - startTime) / 1000).toFixed(2);
+            
+            loadingSpinner.classList.add('hidden');
+            displayResults(results);
+        };
+        reader.readAsText(currentFile);
+    });
+
+    const displayResults = (results) => {
+        summarySection.classList.remove('hidden');
+        summaryContent.innerHTML = `
+            <div class="bg-gray-700/50 p-3 rounded-lg"><div class="text-xs text-gray-400">Formato</div><div class="text-lg font-bold">${results.format}</div></div>
+            <div class="bg-gray-700/50 p-3 rounded-lg"><div class="text-xs text-gray-400">Imóveis</div><div class="text-lg font-bold">${results.imoveisCount}</div></div>
+            <div class="bg-gray-700/50 p-3 rounded-lg"><div class="text-xs text-gray-400">Erros</div><div class="text-lg font-bold text-red-400">${results.errors.length}</div></div>
+            <div class="bg-gray-700/50 p-3 rounded-lg"><div class="text-xs text-gray-400">Avisos</div><div class="text-lg font-bold text-yellow-400">${results.warnings.length}</div></div>
+            <div class="bg-gray-700/50 p-3 rounded-lg"><div class="text-xs text-gray-400">Tempo</div><div class="text-lg font-bold">${results.executionTime}s</div></div>
+        `;
+        
+        let existingStatus = summarySection.querySelector('.status-message');
+        if(existingStatus) existingStatus.remove();
+
+        if (results.errors.length === 0 && results.warnings.length === 0) {
+             summaryContent.insertAdjacentHTML('afterend', `<p class="status-message text-center col-span-2 md:col-span-5 mt-4 text-green-400">✅ O arquivo parece estar perfeito!</p>`);
+        }
+
+        warningsSection.classList.add('hidden');
+        if (results.warnings.length > 0) {
+            warningsSection.classList.remove('hidden');
+            warningsList.innerHTML = results.warnings.map(w => `<div>- ${w}</div>`).join('');
+        }
+        
+        errorsSection.classList.add('hidden');
+        if (results.errors.length > 0) {
+            errorsSection.classList.remove('hidden');
+            errorsList.innerHTML = results.errors.map(e => `<div>- ${e}</div>`).join('');
+        }
+    };
+});
+</script>
+
+</body>
+</html>
+
